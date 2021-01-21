@@ -1,0 +1,11 @@
+# 사용할 Prisma API의 HTTP 엔드포인트
+#endpoint: ''endpoint: https://eu1.prisma.sh/souvenir718-a0a5c8/hackernews-node/dev
+
+
+# 데이터 모델을 포함하고 있는 파일의 이름
+datamodel: datamodel.prisma
+
+# 생성될 Prisma Client의 언어와 생성 위치 지정
+generate:
+    - generator: javascript-client
+      output: ../src/generated/prisma-client
