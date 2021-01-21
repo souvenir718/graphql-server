@@ -148,6 +148,534 @@ const typeDefs = `
 
 ### 쿼리 리졸브 과정
 
+  GraphQL 서버가 하는 일은 바로 쿼리에 포함된 모든 필드에 대하여 리졸버 함수를 각각 호출하고, 쿼리의 모양에 따라 데이터를 잘 포장하여 응답으로 만드는 것이다. 따라서 쿼리를 처리한다는 것은 리졸버 함수들의 호출을 잘 조율하는 일이다.
+
+#### `Link`타입의 리졸버
+
+```javascript
+Link: {
+    id: (parent) => parent.id,
+    description: (parent) => parent.description,
+    url: (parent) => parent.url,
+}
+```
+
+> 모든 GraphQL 리졸버 함수는 4개의 인자를 입력받아야 한다.
+
+- `parent`라고 불리는 첫번째 인자는 바로 직전 리졸버 실행 수준에서의 결과값이다.
+
+  GraphQL 쿼리는 중첩될 수 있다. 각 중첩 수준(중첩된 괄호들)은 리졸버 하나의 실행 수준에 대응한다. 아래의 쿼리는 2개의 실행 수준을 갖는다.
+
+  ```javascript
+  query {
+      feed {
+          id
+          url
+          description
+      }
+  }
+  ```
+
+  - 첫번째 수준에서는 `feed` 리졸버를 호출하고 `links`에 포함된 모든 데이터를 반환한다. 
+  - 두번째 수준에서는 직전의 리졸버 실행 수준에서 반환된 리스트에 포함된 각각의 항목들에 대하여 `Link` 타입의 리졸버를 호출한다.
+  - `Link`가 가지는 3개의 리졸버에서 인자로 들어오는 `parent` 객체는 `links` 리스트의 각 항목이다.
+
+
+
+### Prisma
+
+> Prisma는 쿼리 리졸빙을 처리해주는 편리한 데이터 접근 계층을 제공한다.
+>
+> Prisma를 사용하면, 서버로 들어온 쿼리를 Prisma에 전달하고, Prisma는 이를 받아 실제 데이터베이스에 맞추어 쿼리를 리졸브하는 식으로 리졸버를 구현하게 된다. Prisma Client 덕분에, 리졸브 구현은 대부분의 경우 한두 줄로 구현이 가능할 정도로 간단하다.
+
+#### 구조
+
+Prisma를 사용하여 GraphQL 서버를 구축할 때에 사용되는 구조다.
+
+![](C:\Users\INNOGRID\AppData\Roaming\Typora\typora-user-images\image-20210121103331496.png) 
+
+- Prisma 서버는 어플리케이션 구조 상에 데이터 접근 계층을 제공, API 서버가 Prisma를 거쳐서 데이터베이스와 상호작용하기 쉽게 만들어준다.
+- Prisma 서버의 API는 우리의 API 서버 구현 안에서 작동하는 Prisma Client가 사용하게 된다.(ORM과 유사)
+
+
+
+- `prisma.yml` : Prisma를 설정에 사용되는 주요 구성 파일.
+- `datamodel.prisma` : 데이터 모델의 정의를 포함한다.
+  - Prisma 데이터 모델은 어플리케이션의 모델을 정의한다.
+  - 각 모델은 데이터베이스 상의 한 테이블에 대응된다
+
+```javascript
+# schemal.graphql
+type Link {
+    id: ID!
+    description: String!
+    url: String!
+}
+
+# datamodel.prisma
+type Link {
+    id: ID! @id
+    createdAt: DateTime! @createdAt
+    description: String!
+    url: String!
+}
+```
+
+`schema.graphql`에서의 `Link`와 비교했을 때 2가지 차이점이 있다.
+
+- `id: ID!` 필드에 추가한 `@id` 지시자다. 
+  - Prisma가 DB 상의 `Link` 레코드가 가지는 `id` 필드에 대하여 전역적으로 고유한 ID값을 자동 생성하고 저장한다는 의미다.
+- `createdAt: DateTime! @createdAt` 필드의 추가
+  - `@createdAt` 지시자 덕분에 이 필드는 Prisma가 관리하고 API 상에서 읽기 전용이 된다.
+  - 특정 `Link`가 생성된 시간을 저장한다.
+  - 어떤 레코드가 갱신되었을 때를 추적하기 위하여 `@updatedAt` 지시자를 사용할 수 있다.
+
+
+
+```yaml
+# prisma.yml
+
+# 사용할 Prisma API의 HTTP 엔드포인드
+endpoint: ''
+
+# 데이터 모델을 포함하고 있는 파일의 이름
+datamodel: datamodel.prisma
+
+# 생성될 Prisma Client의 언어와 생성 위치 지정
+generate:
+  - generator: javascript-client
+    output: ../src/generated/prisma-client
+```
+
+- `endpoint` : 사용할 Prisma API의 HTTP 엔드포인트.
+- `datamodel` : 데이터 모델이 포함된 파일을 저장한다.
+  - 이 파일을 기반으로 API 서버에서 사용할 Prisma Client가 생성된다.
+
+- `generate` : 생성되는 Prisma Client의 사용 언어와 생성 위치를 지정한다.
+
+
+
+```javascript
+# 데이터베이스로부터의 실제 데이터 반환하기 위해, resolver 객체 수정
+const resolvers = {
+    Query: {
+        info: () => `This is the API of a Hackernews Clone`,
+        feed: (root, args, context, info) => {
+            return context.prisma.links()
+        }
+    },
+    Mutation: {
+        post: (root, args, context) => {
+            return context.prisma.createLink({
+                url: args.url,
+                description: args.description
+            })
+        }
+    }
+}
+```
+
+#### context 인자
+
+- `context` 인자는 리졸버 체인 상의 모든 리졸버가 읽기/쓰기를 할 수 있는 자바스크립트 객체를 말한다. 리졸버 간에 정보를 교환할 수 있도록 해주는 수단이다.
+  - GraphQL 서버가 초기화되는 시점에 `context` 객체에 값을 쓰는 것도 가능하다.
+- `context`를 사용하면 임의의 데이터나 함수를 리졸버에 전달할 수 있다.
+
+#### post 리졸버의 이해
+
+- Prisma Client API의 `createLink` 메서드를 실행하고 그 반환값을 그대로 돌려준다.
+  - `createLink`의 인자로는 리졸버가 받은 `args` 매개변수를 통하여 받은 데이터를 전달한다
+
+- Prisma의 클라이언트는 DB에 읽기/쓰기할 수 있도록 데이터 모델상의 각 모델에 대한 CRUD API를 노출한다.
+  - 사용되는 메서드들은 `datamodel.prisma` 상에서 정의된 모델 정의에 따라 자동으로 생성된다.
+
+
+
+#### 인증 리졸버
+
+```javascript
+# Mutation.js
+async function signup(parent, args, context, info) {
+    const password = await bcrypt.hash(args.password, 10);
+
+    const user = await context.prisma.createUser({ ...args, password });
+
+    const token = jwt.sign({ userId: user.id }, APP_SECRET);
+
+    return {
+        token,
+        user,
+    };
+}
+
+async function login(parent, args, context, info) {
+    const user = await context.prisma.user({ email: args.email });
+    if (!user) {
+        throw new Error('No such user found');
+    }
+
+    const valid = await bcrypt.compare(args.password, user.password);
+    if (!valid) {
+        throw new Error('Invalid password');
+    }
+
+    const token = jwt.sign({ userId: user.id }, APP + SECRET);
+
+    return {
+        token,
+        user,
+    };
+}
+```
+
+##### `signup`
+
+- `User`의 비밀 번호를 암호화한다. 암호화에는 `brcypt` 라이브러리 사용.
+- `prisma` 클라이언트를 사용하여 데이터베이스에 새로운 `User`를 저장
+- `APP_SECRET` 값으로 서명된 JWT를 생성한다. 여기서 사용되는 `APP_SECRET`는 별도로 설정해야 하며, `jwt` 라이브러리도 설치해야 한다.
+- GraphQL 스키마에 정의된 `AuthPayload` 객체 형태에 부합하도록, `token`과 `user`를 포함하는 객체를 반환한다.
+
+##### `login`
+
+- 새로운 `User` 객체를 생성하는 것이 아니라, `prisma` 클라이언트를 사용하여 기존의 `User` 레코드를 검색하여 반환한다.
+  - `User` 레코드를 검색할 때는 `login` 뮤테이션에 인자로 전달되는 `email` 주소가 사용된다.
+- 제공된 비밀번호와 DB에 저장된 비밀 번호를 비교한다.
+- `token`과 `user`를 반환한다.
+
+
+
+```javascript
+# utils.js
+const jwt = require('jsonwebtoken')
+const APP_SECRET = 'GraphQL-is-aw3some'
+
+function getUserId(context) {
+  const Authorization = context.request.get('Authorization')
+  if (Authorization) {
+    const token = Authorization.replace('Bearer ', '')
+    const { userId } = jwt.verify(token, APP_SECRET)
+    return userId
+  }
+
+  throw new Error('Not authenticated')
+}
+
+module.exports = {
+  APP_SECRET,
+  getUserId,
+}
+```
+
+- `APP_SECRET`은 사용자들에게 발급해줄 JWT를 서명하는데 사용
+
+- `getUserId` 함수는 인증이 요구되는 리졸버(`post` 등)에서 호출할 수 있는 헬퍼 함수다.
+
+  - 우선 `context` 객체로부터 `Authorization` 헤더를 가져온다.
+  - 헤더에는 `User`의 JWT가 들어있다.
+  - JWT를 검증하고 해당 `User`의 ID를 가져온다.
+
+  > 인증을 필요로 하는 리졸버를 **보호**하는데 이 함수를 사용할 수 있다.
+
+
+
+```javascript
+# index.js
+const server = new GraphQLServer({
+  typeDefs: './src/schema.graphql',
+  resolvers,
+  context: {prisma}
+})
+
+// 아래와 같이 변경
+const server = new GraphQLServer({
+  typeDefs: './src/schema.graphql',
+  resolvers,
+  context: request => {
+    return {
+      ...request,
+      prisma,
+    }
+  },
+})
+```
+
+  `request`를 `context` 객체에 직접 추가하지 않고, `context` 객체를 반환하는 함수로 바꾼다. 이러한 접근 방식의 장점은 GraphQL 쿼리를 전달하는 HTTP 요청을 `context`에 직접 추가할 수 있다는 점이다.
+
+  이렇게 되면 `Authorization` 헤더를 읽고 요청을 보낸 사용자가 해당 요청에 상응하는 동작을 수행할 수 있는지 여부를 검증할 수 있게 된다.
+
+
+
+#### post 뮤테이션에 대하여 인증 요구하기
+
+```javascript
+# Mutation.js
+function post(parent, args, context, info) {
+  const userId = getUserId(context)
+  return context.prisma.createLink({
+    url: args.url,
+    description: args.description,
+    postedBy: { connect: { id: userId } },
+  })
+}
+```
+
+- `getUserId` 함수를 사용하여 `User`의 ID를 가져오고 있다.
+  - 이 ID는 JWT 토큰에 저장된 것이고, 이 토큰은 서버로 들어오는 HTTP 요청의 `authorization` 헤더에 설정되어 있다.
+  - 어떤 `User`가 `Link`를 생성했는지 알 수 있다.
+- `userId`를 사용하여, 생성될 `Link`와 `Link`를 생성한 `User`를 연결한다.
+
+ 
+
+### 관계 리졸브하기
+
+```javascript
+# Link.js
+function postedBy(parent, args, context) {
+  return context.prisma.link({ id: parent.id }).postedBy()
+}
+
+module.exports = {
+  postedBy,
+}
+```
+
+1. `postedBy` 리졸버에서는 우선 `prisma` 클라이언트를 사용하여 `Link`를 불러온다.
+2. 해당 `Link`에 대하여 `postedBy` 메서드를 호출한다.
+3. 이 리졸버는 `schema.graphql`에 정의된 `Link` 타입이 가지는 `postedBy` 필드를 리졸브 해야 하므로, `postedBy` 라는 이름을 가져야한다.
+
+
+
+## GraphQL 전송
+
+### 구독(Subscription)
+
+   특정 이벤트가 발생했을 때 서버가 클라이언트로 데이터를 전송해주는 GraphQL 기능이다.
+
+> WebSocket을 사용하여 구현하는것이 일반적이다.
+
+- 처음에 클라이언트는 관심있는 이벤트를 명시한 구독 쿼리를 전송하여, 서버와 길게 지속되는 연결을 형성한다. 
+- 특정 이벤트가 발생할 때마다, 서버는 이 연결을 사용하여 구독 중인 클라이언트에 이벤트 데이터를 푸시한다.
+
+
+
+### Prisma를 활용한 구독
+
+#### 구독할 수 있는 이벤트
+
+- 새로운 모델이 **생성되었을 때 (created)**
+- 기존의 모델이 **수정되었을 때 (updated)**
+- 기존의 모델이 **삭제되었을 때 (deleted)**
+
+Prisma 클라이언트가 가지는 `$subscribe` 메서드를 사용화면 위의 이벤트들을 구독할 수 있다.
+
+
+
+#### 구독을 다루는 리졸버
+
+- 데이터를 직접 반환하지 않고, `AsyncIterator` 를 반환한다.
+  - 이것은 이후에 GraphQL 서버 측에서 클라이언트에 이벤트 데이터를 푸시하는데 사용된다.
+- 구독 리졸버는 객체로 감싸지며, `subscribe` 필드를 통하여 제공된다.
+  - `AsyncIterator`가 발생시키는 데이터로부터 실제로 데이터를 반환하는 `resolve` 필드를 별도로 제공해야 한다.
+
+
+
+```javascript
+# Mutation.js
+async function vote(parent, args, context, info) {
+  // 1
+  const userId = getUserId(context)
+
+  // 2
+  const linkExists = await context.prisma.$exists.vote({
+    user: { id: userId },
+    link: { id: args.linkId },
+  })
+  if (linkExists) {
+    throw new Error(`Already voted for link: ${args.linkId}`)
+  }
+
+  // 3
+  return context.prisma.createVote({
+    user: { connect: { id: userId } },
+    link: { connect: { id: args.linkId } },
+  })
+}
+```
+
+1. 요청으로 들어오는 JWT가 유효한지 `getUserId` 헬퍼 함수를 사용하여 검증한다.
+
+2. `prisma` 클라이언트는 각 모델에 대한 CRUD 메서드 뿐 아니라, 각 모델마다 `$exists` 함수도 생성한다.`$exists` 함수는 `where` 라는 필터 객체를 인자로 받는데, 이를 통하여 해당 타입 요소와 관련된 특정 조건을 명시할 수 있다.
+   - DB 내에서 적어도 1개 이상의 요소가 해당 조건을 만족한다면 `$exists` 함수는 `true`를 반환한다.
+   - 위 코드는 요청을 보낸 `User`가 `args.linkId`로 식별되는 `Link`를 추천하였는지 여부를 확인하는 데 사용된다.
+3. `$exists` 함수가 `false`를 반환한다면, `createVote` 메서드를 사용하여 새로운 `Vote`를 생성하고 이 `Vote`는 `User`와 `Link`에 연결된다.
+
+
+
+## 필터링, 페이지네이션, 정렬
+
+### 필터링
+
+  Prisma를 사용하면, 큰 수고를 들이지 않더라도 필터링 기능을 API에 구현할 수 있다. 첫번째 할일은, API를 통하여 노출시킬 필터에 대하여 생각해보는 것이다.
+
+  지금의 경우, API의 `feed` 쿼리는 필터링 문자열을 받을 수 있다. 이제 이 쿼리는 해당 필터링 문자열 상에 적힌 `url` 또는 `description`을 포함하고 있는 `Link` 요소만을 반환한다.
+
+```javascript
+# schema.graphql
+type Query {
+    info: String!
+    feed(filter: String): [Link!]!
+}
+
+# Query.js
+async function feed(parent, args, context, info) {
+  const where = args.filter ? {               
+    OR: [                                    
+      { description_contains: args.filter }, 
+      { url_contains: args.filter },       
+    ],                                      
+  } : {}                                     
+                                             
+  const links = await context.prisma.links({  
+    where
+  })
+  return links
+}
+```
+
+  `filter` 문자열이 제공되지 않는다면, `where` 객체는 단지 빈 객체가 되며 `links` 쿼리에 대한 응답을 반환할 때에 필터링을 위한 조건이 Prisma 엔진에 적용되지 않게 된다.
+
+  `args`를 통하여 `filter`가 전달되는 경우, 앞서 논의한 바와 같이 2개의 필터링 조건을 표현하는 `where` 객체를 구성하게 된다. 여기서 `where` 인자는 명시된 조건에 부합하지 않는 `Link` 요소를 걸러내기 위하여 Prisma가 사용된다.
+
+```javascript
+# 예시 쿼리
+query {
+  feed(filter:"QL") {
+    id
+  	description
+    url
+    postedBy {
+      id
+      name
+    }
+  }
+}
+```
+
+
+
+### 페이지네이션
+
+#### Limit-Offset
+
+ : 반환될 항목들에 대한 인덱스를 제공하여 전체 목록 중 특정 부분을 요청
+
+  (대부분의 경우, 반환될 항목들에 대한 시작 인덱스(offset)와 개수(limit)를 제공)
+
+#### Cursor-based
+
+  : 목록 내의 모든 요소는 고유 ID(지시자)로서 연관된다. 클라이언트에서는 시작 위치의 요소에 대한 지시자와 항목 개수를 제공한다.
+
+
+
+#### Limit와 Offset은 Prisma API 상에서 다르게 불린다.
+
+- **Limit**는 `first`라고 불리며 시작 인덱스 이후에 등장하는 첫번째 x개의 요소를 가져온다.
+  - `last` 인자를 사용하면 마지막 x개의 요소를 반환한다.
+- **Offset** 인덱스는 `skip`이라고 불리며, 전체 목록 상에서 해당 개수 만큼의 요소를 건너뛴다.
+  - `skip`이 제공되지 않는다면 기본값으로 **0**이 사용된다.
+
+```javascript
+# schema.graphql
+type Query {
+    info: String!
+    feed(filter: String, skip: Int, first: Int): [Link!]!
+}
+
+# Query.js
+async function feed(parent, args, context, info) {
+    const where = args.filter ? {
+        OR: [
+            { description_contains: args.filter },
+            { url_contains: args.filter }
+        ],
+    } : {}
+    
+    const links = await context.prisma.links({
+        where,
+        skip: args.skip,
+        first: args.first
+    })
+    return links
+}
+
+# 예시 쿼리
+query {
+  feed(
+    first: 1
+    skip: 1
+  ) {
+    id
+    description
+    url
+  }
+}
+```
+
+
+
+### 정렬
+
+  Prisma를 사용하면 요소들의 목록을 특정 기준에 따라 정렬하여 반환할 수 있다. 예를 들어, `Link`의 목록을 `url` 또는 `description`의 가나다 순 기준으로 정렬할 수 있다. Hacker News API의 경우, GraphQL 서버 상의 Prisma API가 어떤 정렬 방식을 사용할 것인지 등을 클라이언트 측에서 결정할 수 있도록 해준다. 정렬방식을 가리키는 열거자(`enum`)을 사용한다.
+
+```javascript
+# schema.graphql
+enum LinkOrderByInput {
+  description_ASC
+  description_DESC
+  url_ASC
+  url_DESC
+  createdAt_ASC
+  createdAt_DESC
+}
+
+type Query {
+  info: String!
+  feed(filter: String, skip: Int, first: Int, orderBy: LinkOrderByInput): [Link!]! // 수정
+}
+
+#Query.js
+async function feed(parent, args, context, info) {
+    const where = args.filter
+        ? {
+              OR: [{ description_contains: args.filter }, { url_contains: args.filter }],
+          }
+        : {};
+
+    const links = await context.prisma.links({
+        where,
+        skip: args.skip,
+        first: args.first,
+        orderBy: args.orderBy,
+    });
+    return links;
+}
+
+module.exports = {
+    feed,
+};
+
+# 쿼리 예시
+query {
+  feed(orderBy: createdAt_ASC) {
+    id
+    description
+    url
+  }
+}
+```
+
+
+
 
 
 ### shema.graphql
