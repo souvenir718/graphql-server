@@ -1,5 +1,9 @@
 const { GraphQLServer } = require('graphql-yoga');
 const { prisma } = require('./generated/prisma-client');
+const Query = require('./resolvers/Query');
+const Mutation = require('./resolvers/Mutation');
+const User = require('./resolvers/User');
+const Link = require('./resolvers/Link');
 
 /*
     typeDefs 상수는 GraphQL 스키마를 정의한 것이다.
@@ -70,6 +74,10 @@ const resolvers = {
 
 // let idCount = links.length; // 새로 생성되는 Link 항목에 대한 고유한 ID 값으로 사용할 새로운 정수 변수를 추가.
 const resolvers = {
+    Query,
+    Mutation,
+    User,
+    Link,
     /*
     Query: {
         info: () => `This is the API of a Hackernews Clone`,
@@ -77,13 +85,14 @@ const resolvers = {
     },
     */
 
+    /*
     Query: {
         info: () => `This is the API of a Hackernews Clone`,
         feed: (root, args, context, info) => {
             return context.prisma.links();
         },
     },
-
+    */
     /*
     Mutation: {
         // post 리졸버는 우선 새로운 link 객체를 생성하고, 이것을 기존의 links 리스트에 추가한 뒤 최종적으로 새로 생성된 link를 반환한다.
@@ -97,7 +106,7 @@ const resolvers = {
             return link;
         },
     },*/
-
+    /*
     Mutation: {
         post: (root, args, context) => {
             return context.prisma.createLink({
@@ -105,7 +114,7 @@ const resolvers = {
                 description: args.description,
             });
         },
-    },
+    },*/
 
     /* Link 타입에 대하여 해야할 일을 스스로 추론해 낼 수 있으므로 제거.
     Link: {
@@ -123,7 +132,12 @@ const resolvers = {
 const server = new GraphQLServer({
     typeDefs: './src/schema.graphql',
     resolvers,
-    context: { prisma },
+    context: (request) => {
+        return {
+            ...request,
+            prisma,
+        };
+    },
     // GraphQL 리졸버에서 사용되는 context 객체는 이 시점에 초기화된다.
     // context 객체에 prisma 클라이언트 인스턴스를 추가하므로, 리졸버에서 context.prisma에 접근할 수 있게 된다.
 });

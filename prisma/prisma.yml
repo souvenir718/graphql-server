@@ -1,6 +1,6 @@
 # 사용할 Prisma API의 HTTP 엔드포인트
-#endpoint: ''endpoint: https://eu1.prisma.sh/souvenir718-a0a5c8/hackernews-node/dev
-
+#endpoint: ''
+endpoint: https://eu1.prisma.sh/souvenir718-a0a5c8/hackernews-node/dev
 
 # 데이터 모델을 포함하고 있는 파일의 이름
 datamodel: datamodel.prisma
@@ -9,3 +9,8 @@ datamodel: datamodel.prisma
 generate:
     - generator: javascript-client
       output: ../src/generated/prisma-client
+
+# prisma deploy를 실행할 때마다 항상 호출되게 설정
+hooks:
+    post-deploy:
+        - prisma1 generate
