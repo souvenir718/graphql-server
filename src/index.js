@@ -4,6 +4,8 @@ const Query = require('./resolvers/Query');
 const Mutation = require('./resolvers/Mutation');
 const User = require('./resolvers/User');
 const Link = require('./resolvers/Link');
+const Subscription = require('./resolvers/Subscription');
+const Vote = require('./resolvers/Vote');
 
 /*
     typeDefs 상수는 GraphQL 스키마를 정의한 것이다.
@@ -76,8 +78,10 @@ const resolvers = {
 const resolvers = {
     Query,
     Mutation,
+    Subscription,
     User,
     Link,
+    Vote,
     /*
     Query: {
         info: () => `This is the API of a Hackernews Clone`,
